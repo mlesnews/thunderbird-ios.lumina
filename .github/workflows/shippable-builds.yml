@@ -39,7 +39,9 @@ permissions:
 
 jobs:
   build_and_deploy_ios:
-    if: github.repository == 'thunderbird/thunderbird-ios'
+    # Upstream pin plus this fork. Job can still fail later on missing
+    # Actions secrets or the thunderbird_release environment.
+    if: github.repository == 'thunderbird/thunderbird-ios' || github.repository == 'mlesnews/thunderbird-ios.lumina' || github.repository_owner == 'mlesnews'
     runs-on: macos-26
     environment: thunderbird_release
 
