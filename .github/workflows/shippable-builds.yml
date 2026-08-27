@@ -9,6 +9,14 @@ env:
   XCODE_VERSION: "26.1"
 
 on:
+  # Path-filtered so GitHub indexes this workflow on the fork. Forks do not
+  # run schedule, and workflow_dispatch 404s until the workflow has a run.
+  push:
+    paths:
+      - '.github/workflows/shippable-builds.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/shippable-builds.yml'
   schedule:
     # Weekly run on Friday at 14:00 UTC
     - cron: '0 14 * * 5'
@@ -38,10 +46,18 @@ permissions:
   contents: read
 
 jobs:
+  register_workflow:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm workflow is indexed
+        run: echo "Shippable Builds is registered. Signed deploy still needs workflow_dispatch or schedule, plus Apple secrets."
+
   build_and_deploy_ios:
-    # Upstream pin plus this fork. Job can still fail later on missing
-    # Actions secrets or the thunderbird_release environment.
-    if: github.repository == 'thunderbird/thunderbird-ios' || github.repository == 'mlesnews/thunderbird-ios.lumina' || github.repository_owner == 'mlesnews'
+    # Upstream pin plus this fork. Skip signed deploy on the registration
+    # push/PR. Job can still fail later on missing Actions secrets or the
+    # thunderbird_release environment.
+    if: (github.repository == 'thunderbird/thunderbird-ios' || github.repository == 'mlesnews/thunderbird-ios.lumina' || github.repository_owner == 'mlesnews') && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
     runs-on: macos-26
     environment: thunderbird_release
 
