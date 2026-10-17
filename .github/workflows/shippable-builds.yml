@@ -6,7 +6,8 @@ env:
   DEFAULT_VERSION: &default_version "1.0"
   DEFAULT_NOTIFY_TESTERS: &default_notify_testers false
   DEFAULT_TEST_DEVICE: &default_test_device "iPhone 17"
-  XCODE_VERSION: "26.1"
+  # Match the oldest iOS runtime on macos-26; iOS 26.1 is no longer downloadable.
+  XCODE_VERSION: "26.2"
 
 on:
   # Path-filtered so GitHub indexes this workflow on the fork. Forks do not
