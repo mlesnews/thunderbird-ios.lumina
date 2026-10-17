@@ -6,7 +6,8 @@ env:
   DEFAULT_VERSION: &default_version "1.0"
   DEFAULT_NOTIFY_TESTERS: &default_notify_testers false
   DEFAULT_TEST_DEVICE: &default_test_device "iPhone 17"
-  XCODE_VERSION: "26.1"
+  # Match the oldest iOS runtime on macos-26; iOS 26.1 is no longer downloadable.
+  XCODE_VERSION: "26.2"
 
 on:
   # Path-filtered so GitHub indexes this workflow on the fork. Forks do not
@@ -14,9 +15,15 @@ on:
   push:
     paths:
       - '.github/workflows/shippable-builds.yml'
+      - 'CI/setup_ios_simulator.py'
+      - 'CI/tests/test_setup_ios_simulator.py'
+      - 'fastlane/Fastfile'
   pull_request:
     paths:
       - '.github/workflows/shippable-builds.yml'
+      - 'CI/setup_ios_simulator.py'
+      - 'CI/tests/test_setup_ios_simulator.py'
+      - 'fastlane/Fastfile'
   schedule:
     # Weekly run on Friday at 14:00 UTC
     - cron: '0 14 * * 5'
@@ -50,8 +57,65 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test simulator setup safeguards
+        run: python3 -B -m unittest discover -s CI/tests -v
+
+      - name: Check Fastlane syntax
+        run: ruby -c fastlane/Fastfile
+
       - name: Confirm workflow is indexed
         run: echo "Shippable Builds is registered. Signed deploy still needs workflow_dispatch or schedule, plus Apple secrets."
+
+  simulator_preflight:
+    # No protected environment, signing secrets, Fastlane beta, or upload lane.
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Xcode Select Version
+        uses: mobiledevops/xcode-select-version-action@7b50160de7c8bd6a8c4ee2c2e6b5ee0983886c0b # v1.1.0
+        with:
+          xcode-select-version: ${{ env.XCODE_VERSION }}
+
+      - name: Prepare and boot iOS test simulator
+        shell: bash
+        timeout-minutes: 25
+        env:
+          TEST_DEVICE: ${{ inputs.test_device || env.DEFAULT_TEST_DEVICE }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-simulator"
+          python3 -u CI/setup_ios_simulator.py 2>&1 | tee "$RUNNER_TEMP/ios-simulator/setup.log"
+
+      - name: Collect simulator diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-simulator"
+          {
+            xcode-select -p || true
+            xcodebuild -version || true
+            xcodebuild -showsdks || true
+            xcrun simctl list || true
+            xcrun simctl runtime list || true
+            /usr/bin/log show --last 5m --style compact --predicate 'process == "CoreSimulatorService"' || true
+          } > "$RUNNER_TEMP/ios-simulator/diagnostics.log" 2>&1
+
+      - name: Upload simulator diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: simulator-preflight-${{ github.run_id }}
+          path: ${{ runner.temp }}/ios-simulator/
+          retention-days: 7
 
   build_and_deploy_ios:
     # Upstream pin plus this fork. Skip signed deploy on the registration
@@ -72,8 +136,28 @@ jobs:
         with:
           xcode-select-version: ${{ env.XCODE_VERSION }}
 
-      - name: Ensure iOS Simulator Runtime installed
-        run: xcodebuild -downloadPlatform iOS
+      - name: Prepare and boot iOS test simulator
+        shell: bash
+        timeout-minutes: 25
+        env:
+          TEST_DEVICE: ${{ inputs.test_device || env.DEFAULT_TEST_DEVICE }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-simulator"
+          python3 -u CI/setup_ios_simulator.py 2>&1 | tee "$RUNNER_TEMP/ios-simulator/setup.log"
+
+      - name: Collect simulator diagnostics
+        if: always()
+        timeout-minutes: 2
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-simulator"
+          {
+            xcode-select -p || true
+            xcodebuild -version || true
+            xcodebuild -showsdks || true
+            xcrun simctl list || true
+            xcrun simctl runtime list || true
+            /usr/bin/log show --last 5m --style compact --predicate 'process == "CoreSimulatorService"' || true
+          } > "$RUNNER_TEMP/ios-simulator/diagnostics.log" 2>&1
 
       - name: Setup Ruby and Fastlane
         uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1.321.0
@@ -201,6 +285,7 @@ jobs:
         with:
           name: ios-build-logs-${{ github.run_id }}
           path: |
+            ${{ runner.temp }}/ios-simulator/
             fastlane/logs/
             ~/Library/Logs/gym/
           retention-days: 7

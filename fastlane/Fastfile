@@ -18,11 +18,18 @@ platform :ios do
     # Ensure no uncommited changes
     ensure_git_status_clean
 
+    # Use the exact device verified by CI; retain the local device-name fallback.
+    test_destination = if ENV['TEST_SIMULATOR_UDID'].to_s.empty?
+      "platform=iOS Simulator,name=#{ENV['TEST_DEVICE']}"
+    else
+      "platform=iOS Simulator,id=#{ENV['TEST_SIMULATOR_UDID']}"
+    end
+
     # Run tests
     run_tests(
       scheme: "Thunderbird",
       workspace: "Thunderbird.xcworkspace",
-      destination: "platform=iOS Simulator,name=#{ENV['TEST_DEVICE']}",
+      destination: test_destination,
       code_coverage: true
     )
 
